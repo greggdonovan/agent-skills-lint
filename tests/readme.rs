@@ -4,7 +4,7 @@ use std::process::Command;
 #[test]
 fn readme_is_executable() {
     let bin = assert_cmd::cargo::cargo_bin!("agent-skills-lint");
-    Command::new("sh")
+    Command::new("bash")
         .arg("README.md")
         .env("AGENT_SKILLS_LINT_BIN", bin)
         .assert()

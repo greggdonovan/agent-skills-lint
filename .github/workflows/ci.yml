@@ -21,7 +21,7 @@ jobs:
       - name: Test
         run: cargo test
       - name: README
-        run: AGENT_SKILLS_LINT_BIN=target/debug/agent-skills-lint sh README.md
+        run: AGENT_SKILLS_LINT_BIN=target/debug/agent-skills-lint bash README.md
 
   fuzz-smoke:
     runs-on: ubuntu-latest

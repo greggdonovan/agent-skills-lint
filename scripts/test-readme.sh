@@ -8,4 +8,4 @@ if [ ! -x "$bin" ]; then
   (cd "$repo_root" && cargo build -q)
 fi
 
-AGENT_SKILLS_LINT_BIN="$bin" sh "$repo_root/README.md"
+AGENT_SKILLS_LINT_BIN="$bin" bash "$repo_root/README.md"

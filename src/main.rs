@@ -2,12 +2,14 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 
-use agent_skills_lint::{
-    check_skill, collect_skill_files, display_path, fix_skill, repo_root,
-};
+use agent_skills_lint::{check_skill, collect_skill_files, display_path, fix_skill, repo_root};
 
 #[derive(Parser)]
-#[command(name = "agent-skills-lint", version, about = "Lint and format Agent Skills")]
+#[command(
+    name = "agent-skills-lint",
+    version,
+    about = "Lint and format Agent Skills"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -54,7 +56,11 @@ fn run_check(paths: Vec<PathBuf>) -> i32 {
         }
     }
 
-    if failed { 1 } else { 0 }
+    if failed {
+        1
+    } else {
+        0
+    }
 }
 
 fn run_fix(paths: Vec<PathBuf>) -> i32 {
@@ -83,5 +89,9 @@ fn run_fix(paths: Vec<PathBuf>) -> i32 {
         }
     }
 
-    if failed { 1 } else { 0 }
+    if failed {
+        1
+    } else {
+        0
+    }
 }

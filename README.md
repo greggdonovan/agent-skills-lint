@@ -1,4 +1,7 @@
 # agent-skills-lint
+    # This is executable Markdown that's tested on CI.
+    set -o errexit -o nounset -o pipefail
+    shopt -s expand_aliases
     alias ~~~=":<<'~~~sh'";:<<'~~~sh'
 
 Fast, spec-compliant linter and formatter for Agent Skills (`SKILL.md`).
@@ -80,7 +83,7 @@ Example config:
 ```yaml
 repos:
   - repo: https://github.com/greggdonovan/agent-skills-lint
-    rev: v0.1.2
+    rev: v0.1.3
     hooks:
       - id: agent-skills-lint
       - id: agent-skills-lint-fix
@@ -121,7 +124,7 @@ cargo clippy -- -D warnings
 `README.md` is executable. Run:
 
 ```bash
-sh README.md
+bash README.md
 ```
 
 Only code blocks fenced with `~~~sh` are executed; everything else is ignored.

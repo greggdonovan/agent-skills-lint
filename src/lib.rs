@@ -121,7 +121,12 @@ pub fn collect_skill_files(paths: &[PathBuf]) -> Vec<SkillFile> {
             continue;
         }
 
-        if path.is_file() && path.file_name().map(|n| n.eq_ignore_ascii_case("skill.md")).unwrap_or(false) {
+        if path.is_file()
+            && path
+                .file_name()
+                .map(|n| n.eq_ignore_ascii_case("skill.md"))
+                .unwrap_or(false)
+        {
             if let Ok(content) = fs::read_to_string(&path) {
                 skill_files.push(SkillFile {
                     dir_path: path.parent().unwrap_or(&path).to_path_buf(),
@@ -172,7 +177,10 @@ pub fn fix_skill(skill: &SkillFile) -> (bool, Vec<String>) {
     let mut changed = false;
 
     if !skill.dir_path.exists() || !skill.dir_path.is_dir() {
-        return (false, vec![format!("Not a directory: {}", skill.dir_path.display())]);
+        return (
+            false,
+            vec![format!("Not a directory: {}", skill.dir_path.display())],
+        );
     }
 
     let mut skill_path = find_skill_md(&skill.dir_path).unwrap_or_else(|| skill.file_path.clone());
@@ -224,7 +232,10 @@ pub fn fix_skill(skill: &SkillFile) -> (bool, Vec<String>) {
             .map(|name| name.to_string_lossy().to_string())
             .unwrap_or_default();
         metadata.insert("name".to_string(), Value::String(dir_name));
-        metadata.insert("description".to_string(), Value::String(derive_description(&content)));
+        metadata.insert(
+            "description".to_string(),
+            Value::String(derive_description(&content)),
+        );
         body = content.trim_matches('\n').to_string();
         changed = true;
     } else {
@@ -263,7 +274,10 @@ pub fn fix_skill(skill: &SkillFile) -> (bool, Vec<String>) {
         match metadata.get("description") {
             Some(Value::String(desc)) if !desc.trim().is_empty() => {}
             _ => {
-                metadata.insert("description".to_string(), Value::String(derive_description(&body)));
+                metadata.insert(
+                    "description".to_string(),
+                    Value::String(derive_description(&body)),
+                );
                 changed = true;
             }
         }
@@ -305,7 +319,10 @@ pub fn fix_skill(skill: &SkillFile) -> (bool, Vec<String>) {
     (changed, errors)
 }
 
-pub fn validate_metadata(metadata: &BTreeMap<String, Value>, skill_dir: Option<&Path>) -> Vec<String> {
+pub fn validate_metadata(
+    metadata: &BTreeMap<String, Value>,
+    skill_dir: Option<&Path>,
+) -> Vec<String> {
     let mut errors = Vec::new();
 
     let extra_fields: Vec<String> = metadata
@@ -378,10 +395,7 @@ fn validate_name(name: &str, skill_dir: Option<&Path>) -> Vec<String> {
         errors.push("Skill name cannot contain consecutive hyphens".to_string());
     }
 
-    if !normalized
-        .chars()
-        .all(|c| c.is_alphanumeric() || c == '-')
-    {
+    if !normalized.chars().all(|c| c.is_alphanumeric() || c == '-') {
         errors.push(format!(
             "Skill name '{}' contains invalid characters. Only letters, digits, and hyphens are allowed.",
             normalized
@@ -482,11 +496,7 @@ fn format_frontmatter(metadata: &BTreeMap<String, Value>) -> Result<String, Stri
                     let normalized = mapping_to_string_map(map)?;
                     lines.push("metadata:".to_string());
                     for (key, val) in normalized {
-                        lines.push(format!(
-                            "  {}: {}",
-                            format_key(&key),
-                            format_scalar(&val)
-                        ));
+                        lines.push(format!("  {}: {}", format_key(&key), format_scalar(&val)));
                     }
                 }
                 _ => {
@@ -836,7 +846,9 @@ mod tests {
             content: String::new(),
         };
         let errors = check_skill(&skill);
-        assert!(errors.iter().any(|err| err.contains("Missing required file")));
+        assert!(errors
+            .iter()
+            .any(|err| err.contains("Missing required file")));
     }
 
     #[test]
@@ -844,12 +856,16 @@ mod tests {
         let mut metadata = base_metadata();
         metadata.remove("name");
         let errors = validate_metadata(&metadata, None);
-        assert!(errors.iter().any(|err| err.contains("Missing required field")));
+        assert!(errors
+            .iter()
+            .any(|err| err.contains("Missing required field")));
 
         let mut metadata = base_metadata();
         metadata.remove("description");
         let errors = validate_metadata(&metadata, None);
-        assert!(errors.iter().any(|err| err.contains("Missing required field")));
+        assert!(errors
+            .iter()
+            .any(|err| err.contains("Missing required field")));
     }
 
     #[test]
@@ -899,7 +915,9 @@ mod tests {
         let mut metadata = base_metadata();
         metadata.insert("name".to_string(), Value::String("wrong-name".to_string()));
         let errors = validate_metadata(&metadata, Some(&skill_dir));
-        assert!(errors.iter().any(|err| err.contains("must match skill name")));
+        assert!(errors
+            .iter()
+            .any(|err| err.contains("must match skill name")));
     }
 
     #[test]
@@ -937,7 +955,9 @@ mod tests {
             Value::String("x".repeat(MAX_COMPATIBILITY_LENGTH + 1)),
         );
         let errors = validate_metadata(&metadata, None);
-        assert!(errors.iter().any(|err| err.contains("Compatibility exceeds")));
+        assert!(errors
+            .iter()
+            .any(|err| err.contains("Compatibility exceeds")));
 
         let mut metadata = base_metadata();
         metadata.insert("compatibility".to_string(), Value::Number(1.into()));
@@ -975,7 +995,10 @@ mod tests {
     #[test]
     fn format_frontmatter_orders_and_quotes() {
         let mut metadata = BTreeMap::new();
-        metadata.insert("description".to_string(), Value::String("Use: this # now".to_string()));
+        metadata.insert(
+            "description".to_string(),
+            Value::String("Use: this # now".to_string()),
+        );
         metadata.insert("name".to_string(), Value::String("my-skill".to_string()));
         metadata.insert("license".to_string(), Value::String("MIT".to_string()));
         metadata.insert(
@@ -987,8 +1010,14 @@ mod tests {
             Value::String("Bash(git:*)".to_string()),
         );
         let mut meta_map = Mapping::new();
-        meta_map.insert(Value::String("z".to_string()), Value::String("2".to_string()));
-        meta_map.insert(Value::String("a".to_string()), Value::String("1".to_string()));
+        meta_map.insert(
+            Value::String("z".to_string()),
+            Value::String("2".to_string()),
+        );
+        meta_map.insert(
+            Value::String("a".to_string()),
+            Value::String("1".to_string()),
+        );
         metadata.insert("metadata".to_string(), Value::Mapping(meta_map));
         metadata.insert("owner".to_string(), Value::String("me".to_string()));
 
@@ -1088,16 +1117,8 @@ owner: team
         let skill_b = root.join("b").join("skill.md");
         fs::create_dir_all(skill_a.parent().unwrap()).expect("mkdir");
         fs::create_dir_all(skill_b.parent().unwrap()).expect("mkdir");
-        fs::write(
-            &skill_a,
-            "---\nname: a\ndescription: A\n---\nBody\n",
-        )
-        .expect("write");
-        fs::write(
-            &skill_b,
-            "---\nname: b\ndescription: B\n---\nBody\n",
-        )
-        .expect("write");
+        fs::write(&skill_a, "---\nname: a\ndescription: A\n---\nBody\n").expect("write");
+        fs::write(&skill_b, "---\nname: b\ndescription: B\n---\nBody\n").expect("write");
 
         let paths = vec![root.to_path_buf()];
         let skills = collect_skill_files(&paths);
