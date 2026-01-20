@@ -1,24 +1,68 @@
 # agent-skills-lint
+    alias ~~~=":<<'~~~sh'";:<<'~~~sh'
 
-Fast linter and formatter for Agent Skills (`SKILL.md`) files. The rules mirror the Agent Skills reference spec (YAML frontmatter, required fields, naming constraints), with an optional fix mode to normalize formatting.
+Fast, spec-compliant linter and formatter for Agent Skills (`SKILL.md`).
+
+- Validates required YAML frontmatter and field constraints
+- Enforces skill naming rules and directory/name matching (NFKC)
+- Fix mode normalizes formatting and repairs common issues
+- Designed for pre-commit/prek hooks
+
+## Quickstart (tested)
+~~~sh
+set -o errexit -o nounset -o pipefail
+
+repo_root=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+bin="${AGENT_SKILLS_LINT_BIN:-$repo_root/target/debug/agent-skills-lint}"
+
+if [ ! -x "$bin" ]; then
+  (cd "$repo_root" && cargo build -q)
+fi
+
+workdir=$(mktemp -d)
+trap 'rm -rf "$workdir"' EXIT
+cd "$workdir"
+
+mkdir -p skills/good-skill
+cat > skills/good-skill/SKILL.md <<'DOC'
+---
+name: good-skill
+description: Demonstrates a properly formatted skill.
+---
+# Good Skill
+DOC
+
+"$bin" check skills/good-skill
+
+mkdir -p skills/bad-skill
+cat > skills/bad-skill/skill.md <<'DOC'
+# Bad Skill
+
+This skill is missing frontmatter.
+DOC
+
+"$bin" fix skills/bad-skill
+"$bin" check skills/bad-skill
+~~~
 
 ## Install
+
+### From git (today)
 
 ```bash
 cargo install --git https://github.com/greggdonovan/agent-skills-lint
 ```
 
-## Usage
+### From crates.io (soon)
 
-Check one or more skills:
+```bash
+# cargo install agent-skills-lint
+```
+
+## Usage
 
 ```bash
 agent-skills-lint check path/to/skill
-```
-
-Fix formatting issues:
-
-```bash
 agent-skills-lint fix path/to/skill
 ```
 
@@ -26,7 +70,7 @@ If no paths are provided, the tool scans the repo for `SKILL.md` files.
 
 ## Prek / pre-commit
 
-This repo ships a `.pre-commit-hooks.yaml` with two hooks:
+This repo ships `.pre-commit-hooks.yaml` with two hooks:
 
 - `agent-skills-lint` (check)
 - `agent-skills-lint-fix` (manual fix)
@@ -36,7 +80,7 @@ Example config:
 ```yaml
 repos:
   - repo: https://github.com/greggdonovan/agent-skills-lint
-    rev: v0.1.1
+    rev: v0.1.2
     hooks:
       - id: agent-skills-lint
       - id: agent-skills-lint-fix
@@ -48,6 +92,17 @@ Notes:
 - These hooks use `language: system`, so the `agent-skills-lint` binary must be on `PATH`.
 - For local development, you can also use `entry: cargo run --quiet -- check`.
 
+## Rules enforced
+
+- YAML frontmatter is required and must be a mapping.
+- Required fields: `name`, `description`.
+- Optional fields: `license`, `compatibility`, `allowed-tools`, `metadata`.
+- `name` must be lowercase, ≤64 chars, alnum + hyphen, no leading/trailing hyphen, no consecutive hyphens.
+- `name` must match the directory name (after NFKC normalization).
+- `description` ≤1024 chars.
+- `compatibility` ≤500 chars.
+- `metadata` keys/values are stringified; unknown fields are preserved but reported.
+
 ## Exit codes
 
 - `0` when all skills are valid
@@ -57,7 +112,20 @@ Notes:
 
 ```bash
 cargo test
+cargo fmt -- --check
+cargo clippy -- -D warnings
 ```
+
+### README tests
+
+`README.md` is executable. Run:
+
+```bash
+sh README.md
+```
+
+Only code blocks fenced with `~~~sh` are executed; everything else is ignored.
+This is run in CI to keep the README accurate.
 
 ### Fuzzing
 
@@ -65,11 +133,15 @@ This repo includes `cargo-fuzz` targets for frontmatter parsing and metadata val
 
 ```bash
 cargo install cargo-fuzz
-cargo fuzz run parse_frontmatter
-cargo fuzz run validate_metadata
+cargo +nightly fuzz run parse_frontmatter
+cargo +nightly fuzz run validate_metadata
 ```
 
 Notes:
 
 - `cargo-fuzz` uses nightly Rust.
 - Fuzz targets live under `fuzz/fuzz_targets`.
+
+## License
+
+MIT
