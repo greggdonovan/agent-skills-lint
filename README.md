@@ -5,6 +5,12 @@
     shopt -s expand_aliases
     alias ~~~=":<<'~~~sh'";:<<'~~~sh'
 
+[![CI](https://github.com/greggdonovan/agent-skills-lint/actions/workflows/ci.yml/badge.svg)](https://github.com/greggdonovan/agent-skills-lint/actions/workflows/ci.yml)
+[![Crates.io](https://img.shields.io/crates/v/agent-skills-lint.svg)](https://crates.io/crates/agent-skills-lint)
+[![Documentation](https://docs.rs/agent-skills-lint/badge.svg)](https://docs.rs/agent-skills-lint)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![MSRV](https://img.shields.io/badge/MSRV-1.92-blue.svg)](https://blog.rust-lang.org/)
+
 Fast, spec-compliant linter and formatter for Agent Skills (`SKILL.md`).
 
 - Validates required YAML frontmatter and field constraints
@@ -72,6 +78,7 @@ cargo install --git https://github.com/greggdonovan/agent-skills-lint
 ```bash
 agent-skills-lint check path/to/skill
 agent-skills-lint fix path/to/skill
+agent-skills-lint fix --dry-run path/to/skill  # Preview changes without modifying files
 ```
 
 If no paths are provided, the tool scans the repo for `SKILL.md` files.
