@@ -1,0 +1,11 @@
+- id: agent-skills-lint
+  name: agent-skills-lint (check)
+  entry: agent-skills-lint check
+  language: system
+  files: '(^|/)(SKILL|skill)\.md$'
+- id: agent-skills-lint-fix
+  name: agent-skills-lint (fix)
+  entry: agent-skills-lint fix
+  language: system
+  files: '(^|/)(SKILL|skill)\.md$'
+  stages: [manual]
