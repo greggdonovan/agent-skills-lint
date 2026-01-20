@@ -1,0 +1,18 @@
+[package]
+name = "agent-skills-lint-fuzz"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+libfuzzer-sys = "0.4"
+agent-skills-lint = { path = ".." }
+serde_yaml = "0.9.34"
+
+[[bin]]
+name = "parse_frontmatter"
+path = "fuzz_targets/parse_frontmatter.rs"
+
+[[bin]]
+name = "validate_metadata"
+path = "fuzz_targets/validate_metadata.rs"

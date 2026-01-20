@@ -36,7 +36,7 @@ Example config:
 ```yaml
 repos:
   - repo: https://github.com/greggdonovan/agent-skills-lint
-    rev: v0.1.0
+    rev: v0.1.1
     hooks:
       - id: agent-skills-lint
       - id: agent-skills-lint-fix
@@ -52,3 +52,24 @@ Notes:
 
 - `0` when all skills are valid
 - `1` when any errors are found
+
+## Testing
+
+```bash
+cargo test
+```
+
+### Fuzzing
+
+This repo includes `cargo-fuzz` targets for frontmatter parsing and metadata validation.
+
+```bash
+cargo install cargo-fuzz
+cargo fuzz run parse_frontmatter
+cargo fuzz run validate_metadata
+```
+
+Notes:
+
+- `cargo-fuzz` uses nightly Rust.
+- Fuzz targets live under `fuzz/fuzz_targets`.

@@ -1,6 +1,6 @@
 [package]
 name = "agent-skills-lint"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 license = "MIT"
 readme = "README.md"
@@ -12,3 +12,10 @@ clap = { version = "4.5.4", features = ["derive"] }
 serde_yaml = "0.9.34"
 unicode-normalization = "0.1.24"
 walkdir = "2.5.0"
+
+[dev-dependencies]
+assert_cmd = "2.0.14"
+predicates = "3.1.0"
+pretty_assertions = "1.4.0"
+proptest = "1.4.0"
+tempfile = "3.10.1"
