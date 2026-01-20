@@ -18,6 +18,10 @@ set -o errexit -o nounset -o pipefail
 
 repo_root=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
 bin="${AGENT_SKILLS_LINT_BIN:-$repo_root/target/debug/agent-skills-lint}"
+case "$bin" in
+  /*) ;;
+  *) bin="$repo_root/$bin" ;;
+esac
 
 if [ ! -x "$bin" ]; then
   (cd "$repo_root" && cargo build -q)
@@ -84,7 +88,7 @@ Example config:
 ```yaml
 repos:
   - repo: https://github.com/greggdonovan/agent-skills-lint
-    rev: v0.1.3
+    rev: v0.1.4
     hooks:
       - id: agent-skills-lint
       - id: agent-skills-lint-fix
