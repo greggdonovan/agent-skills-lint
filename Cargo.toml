@@ -41,7 +41,7 @@ format_push_string = "allow"
 manual_let_else = "allow"
 
 [dependencies]
-clap = { version = "4.5.4", features = ["derive"] }
+clap = { version = "4.5.57", features = ["derive"] }
 # Note: serde_yaml is deprecated but alternatives (serde_yml) are still early-stage.
 # TODO: Migrate to serde_yml when it reaches 1.0
 serde_yaml = "0.9.34"
