@@ -43,14 +43,34 @@ pub fn display_path(path: &Path, root: &Path) -> String {
 /// Find the SKILL.md file in a directory.
 ///
 /// Prefers uppercase `SKILL.md` over lowercase `skill.md`.
+/// Handles case-insensitive filesystems (macOS, Windows) correctly by
+/// checking actual filenames in the directory listing.
 pub fn find_skill_md(skill_dir: &Path) -> Option<PathBuf> {
-    for name in ["SKILL.md", "skill.md"] {
-        let path = skill_dir.join(name);
-        if path.exists() {
-            return Some(path);
+    // On case-insensitive filesystems, path.exists() returns true for both
+    // "SKILL.md" and "skill.md" even if only one exists. We must read the
+    // actual directory to get the real filename.
+    let entries: Vec<_> = std::fs::read_dir(skill_dir)
+        .ok()?
+        .filter_map(Result::ok)
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().to_string();
+            if name.eq_ignore_ascii_case("skill.md") {
+                Some((name, e.path()))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    // Prefer SKILL.md over skill.md
+    for (name, path) in &entries {
+        if name == "SKILL.md" {
+            return Some(path.clone());
         }
     }
-    None
+
+    // Fall back to any case variant
+    entries.into_iter().next().map(|(_, path)| path)
 }
 
 /// Collect skill files from the given paths.
@@ -127,10 +147,10 @@ pub fn discover_skills(root: &Path) -> Vec<SkillFile> {
                 continue;
             }
             let file_name = entry.file_name().to_string_lossy();
-            if file_name == "SKILL.md" || file_name == "skill.md" {
+            if file_name.eq_ignore_ascii_case("skill.md") {
                 let path = entry.into_path();
-                map.entry(path.parent().unwrap_or(root).to_path_buf())
-                    .or_insert(path);
+                let dir = path.parent().unwrap_or(root).to_path_buf();
+                insert_skill_path(&mut map, dir, path);
             }
         }
     }
@@ -155,10 +175,10 @@ pub fn discover_skills_in_dir(root: &Path) -> Vec<SkillFile> {
             continue;
         }
         let file_name = entry.file_name().to_string_lossy();
-        if file_name == "SKILL.md" || file_name == "skill.md" {
+        if file_name.eq_ignore_ascii_case("skill.md") {
             let path = entry.into_path();
-            map.entry(path.parent().unwrap_or(root).to_path_buf())
-                .or_insert(path);
+            let dir = path.parent().unwrap_or(root).to_path_buf();
+            insert_skill_path(&mut map, dir, path);
         }
     }
 
@@ -200,19 +220,40 @@ fn git_ls_files(root: &Path, untracked: bool) -> Result<Vec<PathBuf>, String> {
 
 fn add_skill_paths(map: &mut BTreeMap<PathBuf, PathBuf>, root: &Path, paths: &[PathBuf]) {
     for rel in paths {
-        let file_name = rel.file_name().and_then(|n| n.to_str()).unwrap_or("");
-        if file_name == "SKILL.md" {
+        let Some(file_name) = rel.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        if file_name.eq_ignore_ascii_case("skill.md") {
             let full = root.join(rel);
-            map.insert(full.parent().unwrap_or(root).to_path_buf(), full);
+            let dir = full.parent().unwrap_or(root).to_path_buf();
+            insert_skill_path(map, dir, full);
         }
     }
-    for rel in paths {
-        let file_name = rel.file_name().and_then(|n| n.to_str()).unwrap_or("");
-        if file_name == "skill.md" {
-            let full = root.join(rel);
-            map.entry(full.parent().unwrap_or(root).to_path_buf())
-                .or_insert(full);
-        }
+}
+
+fn insert_skill_path(map: &mut BTreeMap<PathBuf, PathBuf>, dir: PathBuf, path: PathBuf) {
+    let Some(candidate_rank) = skill_file_rank(&path) else {
+        return;
+    };
+    let should_replace = match map.get(&dir).and_then(|existing| skill_file_rank(existing)) {
+        Some(existing_rank) => candidate_rank < existing_rank,
+        None => true,
+    };
+    if should_replace {
+        map.insert(dir, path);
+    }
+}
+
+fn skill_file_rank(path: &Path) -> Option<u8> {
+    let file_name = path.file_name()?.to_str()?;
+    if file_name == "SKILL.md" {
+        Some(0)
+    } else if file_name == "skill.md" {
+        Some(1)
+    } else if file_name.eq_ignore_ascii_case("skill.md") {
+        Some(2)
+    } else {
+        None
     }
 }
 

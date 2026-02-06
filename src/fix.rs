@@ -11,9 +11,8 @@ use serde_yaml::{Mapping, Value};
 use unicode_normalization::UnicodeNormalization;
 
 use crate::discovery::{find_skill_md, get_dir_name};
-use crate::formatting::{
-    derive_description, format_frontmatter, mapping_to_string_map, parse_frontmatter,
-};
+use crate::error::{FixError, ValidationError};
+use crate::formatting::{derive_description, format_frontmatter, parse_frontmatter};
 use crate::skill::SkillFile;
 use crate::validation::validate_metadata;
 
@@ -22,8 +21,8 @@ use crate::validation::validate_metadata;
 pub struct FixResult {
     /// Whether any changes were made.
     pub changed: bool,
-    /// Any errors that occurred.
-    pub errors: Vec<String>,
+    /// Any errors that occurred during fixing.
+    pub errors: Vec<FixError>,
     /// The new content (for dry-run mode).
     pub new_content: Option<String>,
     /// The target path (may differ from original if renamed).
@@ -33,33 +32,37 @@ pub struct FixResult {
 /// Check a skill file for validation errors.
 ///
 /// Returns a list of validation errors. An empty list indicates the skill is valid.
-pub fn check_skill(skill: &SkillFile) -> Vec<String> {
+pub fn check_skill(skill: &SkillFile) -> Vec<ValidationError> {
     let mut errors = Vec::new();
 
     if !skill.dir_path.exists() {
-        errors.push(format!("Path does not exist: {}", skill.dir_path.display()));
+        errors.push(ValidationError::PathNotFound(
+            skill.dir_path.display().to_string(),
+        ));
         return errors;
     }
 
     if !skill.dir_path.is_dir() {
-        errors.push(format!("Not a directory: {}", skill.dir_path.display()));
+        errors.push(ValidationError::NotADirectory(
+            skill.dir_path.display().to_string(),
+        ));
         return errors;
     }
 
     if !skill.file_path.exists() {
-        errors.push("Missing required file: SKILL.md".to_string());
+        errors.push(ValidationError::MissingFile("SKILL.md".to_string()));
         return errors;
     }
 
     if skill.file_path.file_name().and_then(|n| n.to_str()) != Some("SKILL.md") {
-        errors.push("SKILL.md should be uppercase".to_string());
+        errors.push(ValidationError::NotUppercase);
     }
 
     match parse_frontmatter(&skill.content) {
         Ok((metadata, _body)) => {
             errors.extend(validate_metadata(&metadata, Some(&skill.dir_path)));
         }
-        Err(err) => errors.push(err.to_string()),
+        Err(err) => errors.push(ValidationError::Parse(err)),
     }
 
     errors
@@ -80,10 +83,19 @@ pub fn fix_skill(skill: &SkillFile, dry_run: bool) -> FixResult {
     let mut errors = Vec::new();
     let mut changed = false;
 
-    if !skill.dir_path.exists() || !skill.dir_path.is_dir() {
+    if !skill.dir_path.exists() {
         return FixResult {
             changed: false,
-            errors: vec![format!("Not a directory: {}", skill.dir_path.display())],
+            errors: vec![FixError::PathNotFound(skill.dir_path.clone())],
+            new_content: None,
+            target_path: None,
+        };
+    }
+
+    if !skill.dir_path.is_dir() {
+        return FixResult {
+            changed: false,
+            errors: vec![FixError::NotADirectory(skill.dir_path.clone())],
             new_content: None,
             target_path: None,
         };
@@ -102,10 +114,13 @@ pub fn fix_skill(skill: &SkillFile, dry_run: bool) -> FixResult {
     if needs_rename {
         let new_path = skill_path.with_file_name("SKILL.md");
         if !dry_run {
-            if let Err(err) = fs::rename(&skill_path, &new_path) {
+            if let Err(source) = fs::rename(&skill_path, &new_path) {
                 return FixResult {
                     changed: false,
-                    errors: vec![format!("Failed to rename {}: {err}", skill_path.display())],
+                    errors: vec![FixError::RenameFailed {
+                        path: skill_path,
+                        source,
+                    }],
                     new_content: None,
                     target_path: None,
                 };
@@ -118,7 +133,7 @@ pub fn fix_skill(skill: &SkillFile, dry_run: bool) -> FixResult {
     if !dry_run && !skill_path.exists() {
         return FixResult {
             changed,
-            errors: vec!["Missing required file: SKILL.md".to_string()],
+            errors: vec![FixError::MissingFile],
             new_content: None,
             target_path: Some(skill_path),
         };
@@ -143,7 +158,7 @@ pub fn fix_skill(skill: &SkillFile, dry_run: bool) -> FixResult {
                 body = parsed_body.trim_matches('\n').to_string();
             }
             Err(err) => {
-                errors.push(err.to_string());
+                errors.push(FixError::Parse(err));
                 return FixResult {
                     changed,
                     errors,
@@ -181,15 +196,10 @@ pub fn fix_skill(skill: &SkillFile, dry_run: bool) -> FixResult {
         }
 
         if let Some(Value::Mapping(map)) = metadata.get_mut("metadata") {
-            if let Ok(normalized) = mapping_to_string_map(map) {
-                let mut new_map = Mapping::new();
-                for (key, value) in normalized {
-                    new_map.insert(Value::String(key), Value::String(value));
-                }
-                if *map != new_map {
-                    *map = new_map;
-                    changed = true;
-                }
+            let new_map = normalize_metadata_mapping(map);
+            if *map != new_map {
+                *map = new_map;
+                changed = true;
             }
         }
     } else {
@@ -227,8 +237,11 @@ pub fn fix_skill(skill: &SkillFile, dry_run: bool) -> FixResult {
     }
 
     if changed && !dry_run {
-        if let Err(err) = fs::write(&skill_path, &new_content) {
-            errors.push(format!("Failed to write {}: {err}", skill_path.display()));
+        if let Err(source) = fs::write(&skill_path, &new_content) {
+            errors.push(FixError::WriteFailed {
+                path: skill_path.clone(),
+                source,
+            });
             return FixResult {
                 changed,
                 errors,
@@ -246,10 +259,25 @@ pub fn fix_skill(skill: &SkillFile, dry_run: bool) -> FixResult {
     }
 }
 
-/// Legacy wrapper for `fix_skill` that matches the old API.
-///
-/// Returns (changed, errors) tuple for backward compatibility.
-pub fn fix_skill_compat(skill: &SkillFile) -> (bool, Vec<String>) {
-    let result = fix_skill(skill, false);
-    (result.changed, result.errors)
+fn normalize_metadata_mapping(map: &Mapping) -> Mapping {
+    let mut normalized = Mapping::new();
+    for (key, value) in map {
+        normalized.insert(
+            Value::String(yaml_value_to_string(key)),
+            Value::String(yaml_value_to_string(value)),
+        );
+    }
+    normalized
+}
+
+fn yaml_value_to_string(value: &Value) -> String {
+    match value {
+        Value::String(text) => text.clone(),
+        Value::Number(num) => num.to_string(),
+        Value::Bool(b) => b.to_string(),
+        Value::Null => "null".to_string(),
+        _ => serde_yaml::to_string(value)
+            .map(|serialized| serialized.trim().to_string())
+            .unwrap_or_else(|_| format!("{value:?}")),
+    }
 }

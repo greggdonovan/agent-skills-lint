@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 
 use serde_yaml::{Mapping, Value};
 
-use crate::error::ParseError;
+use crate::error::{FixError, ParseError};
 use crate::skill::FIELD_ORDER;
 
 /// Parse YAML frontmatter from file content.
@@ -35,17 +35,8 @@ use crate::skill::FIELD_ORDER;
 pub fn parse_frontmatter(content: &str) -> Result<(BTreeMap<String, Value>, String), ParseError> {
     let content = content.strip_prefix('\u{feff}').unwrap_or(content);
 
-    if !content.starts_with("---") {
-        return Err(ParseError::MissingFrontmatter);
-    }
-
-    let parts: Vec<&str> = content.splitn(3, "---").collect();
-    if parts.len() < 3 {
-        return Err(ParseError::UnclosedFrontmatter);
-    }
-
-    let frontmatter_str = parts[1];
-    let body = parts[2].trim().to_string();
+    let (frontmatter_str, body) = split_frontmatter(content)?;
+    let body = body.trim().to_string();
 
     let parsed: Value = serde_yaml::from_str(frontmatter_str)?;
 
@@ -53,6 +44,38 @@ pub fn parse_frontmatter(content: &str) -> Result<(BTreeMap<String, Value>, Stri
         Value::Mapping(map) => Ok((mapping_to_btreemap(map)?, body)),
         _ => Err(ParseError::NotAMapping),
     }
+}
+
+fn split_frontmatter(content: &str) -> Result<(&str, &str), ParseError> {
+    if !content.starts_with("---") {
+        return Err(ParseError::MissingFrontmatter);
+    }
+
+    let mut lines = content.split_inclusive('\n');
+    let Some(first_line) = lines.next() else {
+        return Err(ParseError::MissingFrontmatter);
+    };
+
+    if trim_line_ending(first_line) != "---" {
+        return Err(ParseError::MissingFrontmatter);
+    }
+
+    let mut offset = first_line.len();
+    for line in lines {
+        if trim_line_ending(line) == "---" {
+            let frontmatter = &content[first_line.len()..offset];
+            let body = &content[offset + line.len()..];
+            return Ok((frontmatter, body));
+        }
+        offset += line.len();
+    }
+
+    Err(ParseError::UnclosedFrontmatter)
+}
+
+fn trim_line_ending(line: &str) -> &str {
+    let line = line.strip_suffix('\n').unwrap_or(line);
+    line.strip_suffix('\r').unwrap_or(line)
 }
 
 /// Format metadata back into YAML frontmatter.
@@ -67,7 +90,11 @@ pub fn parse_frontmatter(content: &str) -> Result<(BTreeMap<String, Value>, Stri
 /// # Returns
 ///
 /// The formatted frontmatter string including the `---` delimiters.
-pub fn format_frontmatter(metadata: &BTreeMap<String, Value>) -> Result<String, String> {
+///
+/// # Errors
+///
+/// Returns `FixError::UnsupportedValueType` if a value cannot be formatted.
+pub fn format_frontmatter(metadata: &BTreeMap<String, Value>) -> Result<String, FixError> {
     let mut lines: Vec<String> = vec!["---".to_string()];
 
     for field in FIELD_ORDER {
@@ -83,17 +110,19 @@ pub fn format_frontmatter(metadata: &BTreeMap<String, Value>) -> Result<String, 
                 let normalized = mapping_to_string_map(map)?;
                 lines.push("metadata:".to_string());
                 for (key, val) in normalized {
-                    lines.push(format!("  {}: {}", format_key(&key), format_scalar(&val)));
+                    lines.push(format!(
+                        "  {}: {}",
+                        format_key(&key),
+                        format_string_value(&val)
+                    ));
                 }
             } else {
-                let scalar = value_to_string(value)?;
-                lines.push(format!("metadata: {}", format_scalar(&scalar)));
+                lines.push(format!("metadata: {}", format_yaml_scalar(value)?));
             }
             continue;
         }
 
-        let scalar = value_to_string(value)?;
-        lines.push(format!("{}: {}", field, format_scalar(&scalar)));
+        lines.push(format!("{}: {}", field, format_yaml_scalar(value)?));
     }
 
     let unknown_fields: Vec<String> = metadata
@@ -111,12 +140,15 @@ pub fn format_frontmatter(metadata: &BTreeMap<String, Value>) -> Result<String, 
                 lines.push(format!(
                     "  {}: {}",
                     format_key(&sub_key),
-                    format_scalar(&sub_val)
+                    format_string_value(&sub_val)
                 ));
             }
         } else {
-            let scalar = value_to_string(value)?;
-            lines.push(format!("{}: {}", format_key(&key), format_scalar(&scalar)));
+            lines.push(format!(
+                "{}: {}",
+                format_key(&key),
+                format_yaml_scalar(value)?
+            ));
         }
     }
 
@@ -125,13 +157,13 @@ pub fn format_frontmatter(metadata: &BTreeMap<String, Value>) -> Result<String, 
 }
 
 /// Convert a YAML Value to a string representation.
-pub fn value_to_string(value: &Value) -> Result<String, String> {
+pub fn value_to_string(value: &Value) -> Result<String, FixError> {
     match value {
         Value::String(text) => Ok(text.clone()),
         Value::Number(num) => Ok(num.to_string()),
         Value::Bool(b) => Ok(b.to_string()),
         Value::Null => Ok("null".to_string()),
-        _ => Err("Unsupported YAML value type for formatting".to_string()),
+        _ => Err(FixError::UnsupportedValueType),
     }
 }
 
@@ -149,7 +181,7 @@ pub fn mapping_to_btreemap(map: Mapping) -> Result<BTreeMap<String, Value>, Pars
 }
 
 /// Convert a Mapping to a `BTreeMap` with string keys and values.
-pub fn mapping_to_string_map(map: &Mapping) -> Result<BTreeMap<String, String>, String> {
+pub fn mapping_to_string_map(map: &Mapping) -> Result<BTreeMap<String, String>, FixError> {
     let mut result = BTreeMap::new();
     for (key, value) in map {
         let key_str = value_to_string(key)?;
@@ -225,19 +257,48 @@ fn json_quote(value: &str) -> String {
     out
 }
 
+fn format_yaml_scalar(value: &Value) -> Result<String, FixError> {
+    match value {
+        Value::String(text) => Ok(format_string_value(text)),
+        Value::Number(num) => Ok(num.to_string()),
+        Value::Bool(b) => Ok(b.to_string()),
+        Value::Null => Ok("null".to_string()),
+        _ => Err(FixError::UnsupportedValueType),
+    }
+}
+
+fn format_string_value(value: &str) -> String {
+    // Always quote strings to avoid YAML implicit type coercion (e.g. "true", "1").
+    json_quote(value)
+}
+
 /// Derive a description from the body content.
 ///
 /// Looks for the first non-empty, non-heading, non-code-block line.
 /// Falls back to the first heading text, or a placeholder if nothing found.
+///
+/// Handles nested code blocks with 3+ backticks or tildes correctly.
 pub fn derive_description(body: &str) -> String {
-    let mut in_code_block = false;
+    let mut code_fence: Option<(char, usize)> = None;
+
     for raw in body.lines() {
         let line = raw.trim();
-        if line.starts_with("```") {
-            in_code_block = !in_code_block;
+
+        // Check for code fence (``` or ~~~)
+        if let Some(fence_info) = parse_code_fence(line) {
+            if let Some((open_char, open_count)) = code_fence {
+                // We're in a code block - check if this closes it
+                if fence_info.0 == open_char && fence_info.1 >= open_count {
+                    code_fence = None;
+                }
+            } else {
+                // Start a new code block
+                code_fence = Some(fence_info);
+            }
             continue;
         }
-        if in_code_block || line.is_empty() {
+
+        if code_fence.is_some() || line.is_empty() {
             continue;
         }
         if line.starts_with('#') {
@@ -246,6 +307,7 @@ pub fn derive_description(body: &str) -> String {
         return line.to_string();
     }
 
+    // Fall back to first heading
     for raw in body.lines() {
         let line = raw.trim();
         if line.starts_with('#') {
@@ -254,4 +316,19 @@ pub fn derive_description(body: &str) -> String {
     }
 
     "Describe what this skill does and when to use it".to_string()
+}
+
+/// Parse a code fence line, returning the fence character and count.
+fn parse_code_fence(line: &str) -> Option<(char, usize)> {
+    let first_char = line.chars().next()?;
+    if first_char != '`' && first_char != '~' {
+        return None;
+    }
+
+    let count = line.chars().take_while(|&c| c == first_char).count();
+    if count < 3 {
+        return None;
+    }
+
+    Some((first_char, count))
 }

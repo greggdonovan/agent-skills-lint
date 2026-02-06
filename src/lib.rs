@@ -36,7 +36,7 @@ pub mod validation;
 pub use discovery::{collect_skill_files, display_path, find_skill_md, repo_root};
 pub use error::{FixError, ParseError, ValidationError};
 pub use fix::{check_skill, fix_skill, FixResult};
-pub use formatting::parse_frontmatter;
+pub use formatting::{format_frontmatter, parse_frontmatter};
 pub use skill::{
     SkillFile, ALLOWED_FIELDS, FIELD_ORDER, MAX_COMPATIBILITY_LENGTH, MAX_DESCRIPTION_LENGTH,
     MAX_SKILL_NAME_LENGTH,
@@ -99,6 +99,17 @@ mod tests {
     }
 
     #[test]
+    fn parse_frontmatter_allows_triple_dash_in_quoted_strings() {
+        let content = "---\nname: my-skill\ndescription: \"contains --- in text\"\n---\nBody\n";
+        let (metadata, body) = parse_frontmatter(content).expect("frontmatter parsed");
+        assert_eq!(
+            metadata.get("description"),
+            Some(&Value::String("contains --- in text".to_string()))
+        );
+        assert_eq!(body, "Body");
+    }
+
+    #[test]
     fn parse_frontmatter_errors() {
         let missing = "No frontmatter here";
         assert!(matches!(
@@ -139,11 +150,25 @@ mod tests {
         let dir = TempDir::new().expect("temp dir");
         let skill_dir = dir.path().join("skill");
         fs::create_dir_all(&skill_dir).expect("mkdir");
-        write_skill(&skill_dir, "skill.md", "lowercase");
+
+        // On case-insensitive filesystems (macOS/Windows), creating both files
+        // just overwrites the same file. The new find_skill_md reads the actual
+        // directory entry, so test that it returns whatever exists.
         write_skill(&skill_dir, "SKILL.md", "uppercase");
 
         let found = find_skill_md(&skill_dir).expect("find skill");
         assert_eq!(found.file_name().unwrap().to_string_lossy(), "SKILL.md");
+
+        // Test that lowercase is also found when only lowercase exists
+        fs::remove_file(skill_dir.join("SKILL.md")).expect("remove");
+        write_skill(&skill_dir, "skill.md", "lowercase");
+        let found = find_skill_md(&skill_dir).expect("find skill");
+        // On case-insensitive FS, the name will be "skill.md"
+        assert!(found
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .eq_ignore_ascii_case("skill.md"));
     }
 
     #[test]
@@ -158,7 +183,7 @@ mod tests {
         let errors = check_skill(&skill);
         assert!(errors
             .iter()
-            .any(|err| err.contains("Missing required file")));
+            .any(|err| matches!(err, ValidationError::MissingFile(_))));
     }
 
     #[test]
@@ -168,14 +193,14 @@ mod tests {
         let errors = validate_metadata(&metadata, None);
         assert!(errors
             .iter()
-            .any(|err| err.contains("Missing required field")));
+            .any(|err| matches!(err, ValidationError::MissingField(f) if f == "name")));
 
         let mut metadata = base_metadata();
         metadata.remove("description");
         let errors = validate_metadata(&metadata, None);
         assert!(errors
             .iter()
-            .any(|err| err.contains("Missing required field")));
+            .any(|err| matches!(err, ValidationError::MissingField(f) if f == "description")));
     }
 
     #[test]
@@ -183,28 +208,38 @@ mod tests {
         let mut metadata = base_metadata();
         metadata.insert("name".to_string(), Value::String("MySkill".to_string()));
         let errors = validate_metadata(&metadata, None);
-        assert!(errors.iter().any(|err| err.contains("must be lowercase")));
+        assert!(errors
+            .iter()
+            .any(|err| matches!(err, ValidationError::NameNotLowercase(_))));
 
         let mut metadata = base_metadata();
         metadata.insert("name".to_string(), Value::String("-my-skill".to_string()));
         let errors = validate_metadata(&metadata, None);
-        assert!(errors.iter().any(|err| err.contains("cannot start or end")));
+        assert!(errors
+            .iter()
+            .any(|err| matches!(err, ValidationError::NameInvalidHyphen)));
 
         let mut metadata = base_metadata();
         metadata.insert("name".to_string(), Value::String("my--skill".to_string()));
         let errors = validate_metadata(&metadata, None);
-        assert!(errors.iter().any(|err| err.contains("consecutive hyphens")));
+        assert!(errors
+            .iter()
+            .any(|err| matches!(err, ValidationError::NameConsecutiveHyphens)));
 
         let mut metadata = base_metadata();
         metadata.insert("name".to_string(), Value::String("my_skill".to_string()));
         let errors = validate_metadata(&metadata, None);
-        assert!(errors.iter().any(|err| err.contains("invalid characters")));
+        assert!(errors
+            .iter()
+            .any(|err| matches!(err, ValidationError::NameInvalidChars(_))));
 
         let long_name = "a".repeat(MAX_SKILL_NAME_LENGTH + 1);
         let mut metadata = base_metadata();
         metadata.insert("name".to_string(), Value::String(long_name));
         let errors = validate_metadata(&metadata, None);
-        assert!(errors.iter().any(|err| err.contains("character limit")));
+        assert!(errors
+            .iter()
+            .any(|err| matches!(err, ValidationError::NameTooLong { .. })));
     }
 
     #[test]
@@ -227,7 +262,7 @@ mod tests {
         let errors = validate_metadata(&metadata, Some(&skill_dir));
         assert!(errors
             .iter()
-            .any(|err| err.contains("must match skill name")));
+            .any(|err| matches!(err, ValidationError::NameMismatch { .. })));
     }
 
     #[test]
@@ -246,7 +281,9 @@ mod tests {
         let mut metadata = base_metadata();
         metadata.insert("name".to_string(), Value::String(upper.to_string()));
         let errors = validate_metadata(&metadata, None);
-        assert!(errors.iter().any(|err| err.contains("must be lowercase")));
+        assert!(errors
+            .iter()
+            .any(|err| matches!(err, ValidationError::NameNotLowercase(_))));
     }
 
     #[test]
@@ -257,7 +294,9 @@ mod tests {
             Value::String("x".repeat(MAX_DESCRIPTION_LENGTH + 1)),
         );
         let errors = validate_metadata(&metadata, None);
-        assert!(errors.iter().any(|err| err.contains("Description exceeds")));
+        assert!(errors
+            .iter()
+            .any(|err| matches!(err, ValidationError::DescriptionTooLong { .. })));
 
         let mut metadata = base_metadata();
         metadata.insert(
@@ -267,14 +306,21 @@ mod tests {
         let errors = validate_metadata(&metadata, None);
         assert!(errors
             .iter()
-            .any(|err| err.contains("Compatibility exceeds")));
+            .any(|err| matches!(err, ValidationError::CompatibilityTooLong { .. })));
 
         let mut metadata = base_metadata();
         metadata.insert("compatibility".to_string(), Value::Number(1.into()));
         let errors = validate_metadata(&metadata, None);
         assert!(errors
             .iter()
-            .any(|err| err.contains("compatibility") && err.contains("string")));
+            .any(|err| matches!(err, ValidationError::InvalidType(f) if f == "compatibility")));
+
+        let mut metadata = base_metadata();
+        metadata.insert("compatibility".to_string(), Value::String(String::new()));
+        let errors = validate_metadata(&metadata, None);
+        assert!(errors
+            .iter()
+            .any(|err| matches!(err, ValidationError::EmptyField(f) if f == "compatibility")));
     }
 
     #[test]
@@ -290,7 +336,9 @@ mod tests {
         let mut metadata = base_metadata();
         metadata.insert("owner".to_string(), Value::String("me".to_string()));
         let errors = validate_metadata(&metadata, None);
-        assert!(errors.iter().any(|err| err.contains("Unexpected fields")));
+        assert!(errors
+            .iter()
+            .any(|err| matches!(err, ValidationError::UnexpectedFields { .. })));
     }
 
     #[test]
@@ -338,15 +386,15 @@ mod tests {
         let formatted = format_frontmatter(&metadata).expect("format frontmatter");
         let expected = [
             "---",
-            "name: my-skill",
+            "name: \"my-skill\"",
             "description: \"Use: this # now\"",
-            "license: MIT",
-            "compatibility: Rust 1.75+",
+            "license: \"MIT\"",
+            "compatibility: \"Rust 1.75+\"",
             "allowed-tools: \"Bash(git:*)\"",
             "metadata:",
-            "  a: 1",
-            "  z: 2",
-            "owner: me",
+            "  a: \"1\"",
+            "  z: \"2\"",
+            "owner: \"me\"",
             "---",
         ]
         .join("\n");
@@ -370,16 +418,51 @@ mod tests {
         };
 
         let errors = check_skill(&skill);
-        assert!(errors.iter().any(|err| err.contains("uppercase")));
+        assert!(errors
+            .iter()
+            .any(|err| matches!(err, ValidationError::NotUppercase)));
 
         let result = fix_skill(&skill, false);
         assert!(result.changed);
         assert!(result.errors.is_empty());
 
         let fixed = fs::read_to_string(skill_dir.join("SKILL.md")).expect("read fixed");
-        assert!(fixed.contains("name: my-skill"));
-        assert!(fixed.contains("description: Use this skill to do X."));
+        assert!(fixed.contains("name: \"my-skill\""));
+        assert!(fixed.contains("description: \"Use this skill to do X.\""));
         assert!(fixed.ends_with('\n'));
+
+        let fixed_skill = SkillFile {
+            dir_path: skill_dir.clone(),
+            file_path: skill_dir.join("SKILL.md"),
+            content: fixed,
+        };
+        let errors = check_skill(&fixed_skill);
+        assert!(errors.is_empty());
+    }
+
+    #[test]
+    fn fix_skill_preserves_string_scalars_that_look_like_bools() {
+        let dir = temp_skill_dir("true-skill");
+        let skill_dir = dir.path().join("true-skill");
+        let content = r#"---
+name: true-skill
+description: "true"
+---
+Body
+"#;
+        let skill_path = write_skill(&skill_dir, "SKILL.md", content);
+        let skill = SkillFile {
+            dir_path: skill_dir.clone(),
+            file_path: skill_path,
+            content: fs::read_to_string(skill_dir.join("SKILL.md")).unwrap(),
+        };
+
+        let result = fix_skill(&skill, false);
+        assert!(result.changed);
+        assert!(result.errors.is_empty());
+
+        let fixed = fs::read_to_string(skill_dir.join("SKILL.md")).expect("read fixed");
+        assert!(fixed.contains("description: \"true\""));
 
         let fixed_skill = SkillFile {
             dir_path: skill_dir.clone(),
@@ -415,12 +498,12 @@ owner: team
         assert!(result.errors.is_empty());
 
         let fixed = fs::read_to_string(skill_dir.join("SKILL.md")).expect("read fixed");
-        assert!(fixed.contains("name: my-skill"));
-        assert!(fixed.contains("description: A test skill"));
+        assert!(fixed.contains("name: \"my-skill\""));
+        assert!(fixed.contains("description: \"A test skill\""));
         assert!(fixed.contains("metadata:"), "fixed content:\n{fixed}");
-        assert!(fixed.contains("  count: 5"));
-        assert!(fixed.contains("  version: 1.2"));
-        assert!(fixed.contains("owner: team"));
+        assert!(fixed.contains("  count: \"5\""));
+        assert!(fixed.contains("  version: \"1.2\""));
+        assert!(fixed.contains("owner: \"team\""));
     }
 
     #[test]
@@ -478,7 +561,15 @@ owner: team
             let mut metadata = base_metadata();
             metadata.insert("name".to_string(), Value::String(name));
             let errors = validate_metadata(&metadata, None);
-            prop_assert!(errors.iter().all(|err| !err.contains("Skill name")));
+            // Valid names should not produce name-related errors
+            let has_name_error = errors.iter().any(|err| matches!(err,
+                ValidationError::NameTooLong { .. } |
+                ValidationError::NameNotLowercase(_) |
+                ValidationError::NameInvalidHyphen |
+                ValidationError::NameConsecutiveHyphens |
+                ValidationError::NameInvalidChars(_)
+            ));
+            prop_assert!(!has_name_error);
         }
 
         #[test]
@@ -486,7 +577,8 @@ owner: team
             let mut metadata = base_metadata();
             metadata.insert("name".to_string(), Value::String(name));
             let errors = validate_metadata(&metadata, None);
-            prop_assert!(errors.iter().any(|err| err.contains("lowercase")));
+            let has_lowercase_error = errors.iter().any(|err| matches!(err, ValidationError::NameNotLowercase(_)));
+            prop_assert!(has_lowercase_error);
         }
 
         #[test]
@@ -497,7 +589,8 @@ owner: team
             let mut metadata = base_metadata();
             metadata.insert("description".to_string(), Value::String(desc));
             let errors = validate_metadata(&metadata, None);
-            prop_assert!(errors.iter().all(|err| !err.contains("Description")));
+            let has_desc_error = errors.iter().any(|err| matches!(err, ValidationError::DescriptionTooLong { .. }));
+            prop_assert!(!has_desc_error);
         }
 
         #[test]
@@ -505,7 +598,8 @@ owner: team
             let mut metadata = base_metadata();
             metadata.insert("description".to_string(), Value::String(desc));
             let errors = validate_metadata(&metadata, None);
-            prop_assert!(errors.iter().any(|err| err.contains("Description exceeds")));
+            let has_desc_error = errors.iter().any(|err| matches!(err, ValidationError::DescriptionTooLong { .. }));
+            prop_assert!(has_desc_error);
         }
     }
 }
