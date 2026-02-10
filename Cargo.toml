@@ -53,7 +53,7 @@ walkdir = "2.5.0"
 assert_cmd = "2.0.14"
 predicates = "3.1.0"
 pretty_assertions = "1.4.0"
-proptest = "1.4.0"
+proptest = "1.10.0"
 tempfile = "3.10.1"
 
 [package.metadata.docs.rs]
